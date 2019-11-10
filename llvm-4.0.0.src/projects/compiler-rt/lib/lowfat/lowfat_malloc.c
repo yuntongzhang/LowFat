@@ -109,8 +109,18 @@ extern bool lowfat_malloc_init(void)
 extern void *lowfat_malloc_index(size_t idx, size_t size);
 extern void *lowfat_malloc(size_t size)
 {
-    size_t idx = lowfat_heap_select(size);
-    return lowfat_malloc_index(idx, size);
+    // TODO: remove magic number
+    size_t new_size = size + 32;
+    size_t idx = lowfat_heap_select(new_size);
+    void *ptr = lowfat_malloc_index(idx, new_size);
+    if (!lowfat_is_ptr(ptr)) {
+        // non-fat pointer from stdlib malloc()
+        // TODO: allocate without padding for non-fat pointer
+        return ptr;
+    } else {
+        // 32 bytes redzone at the beginning of allocation
+        return (void *)(ptr + 32);
+    }
 }
 extern void *lowfat_malloc_index(size_t idx, size_t size)
 {

@@ -152,8 +152,7 @@ extern void lowfat_oob_warning(unsigned _info, const void *_ptr,
  * Check if the given pointer is OOB.  If it is then abort with a call to
  * lowfat_oob_error().
  */
-extern void lowfat_oob_check(unsigned _info, const void *_ptr, size_t _size,
-    const void *_baseptr);
+extern void lowfat_oob_check(unsigned _info, const void *_ptr);
 
 /*
  * Safe replacement malloc().

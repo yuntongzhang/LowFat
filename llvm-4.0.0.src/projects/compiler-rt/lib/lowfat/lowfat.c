@@ -470,18 +470,18 @@ extern LOWFAT_NORETURN void lowfat_oob_error(unsigned info,
     const void *ptr, const void *baseptr)
 {
     const char *kind = lowfat_error_kind(info);
-    ssize_t overflow = (ssize_t)ptr - (ssize_t)baseptr;
-    if (overflow > 0)
-        overflow -= lowfat_size(baseptr);
+    // baseptr is the allocation base (before redzone), not object base
+    ssize_t underflow = (ssize_t)ptr - (ssize_t)baseptr - 32;
     lowfat_error(
         "out-of-bounds error detected!\n"
-        "\toperation = %s\n"
-        "\tpointer   = %p (%s)\n"
-        "\tbase      = %p\n"
-        "\tsize      = %zu\n"
-        "\t%s = %+zd\n",
-        kind, ptr, lowfat_kind(ptr), baseptr, lowfat_size(baseptr),
-        (overflow < 0? "underflow": "overflow "), overflow);
+        "\toperation        = %s\n"
+        "\tpointer          = %p (%s)\n"
+        "\tallocation_base  = %p\n"
+        "\tobject_base      = %p\n"
+        "\tallocation_size  = %zu\n"
+        "\tunderflow        = %+zd\n",
+        kind, ptr, lowfat_kind(ptr), baseptr, baseptr+32,
+        lowfat_size(baseptr), underflow);
 }
 
 extern void lowfat_oob_warning(unsigned info,
@@ -502,14 +502,12 @@ extern void lowfat_oob_warning(unsigned info,
         (overflow < 0? "underflow": "overflow "), overflow);
 }
 
-extern void lowfat_oob_check(unsigned info, const void *ptr, size_t size0,
-    const void *baseptr)
-{
-    size_t size = lowfat_size(baseptr);
-    size_t diff = (size_t)((const uint8_t *)ptr - (const uint8_t *)baseptr);
-    size -= size0;
-    if (diff >= size)
-        lowfat_oob_error(info, ptr, baseptr);
+extern void lowfat_oob_check(unsigned info, const void *ptr)
+{   
+    void *base_ptr = lowfat_base(ptr);
+    size_t diff = (size_t)((const uint8_t *)ptr - (const uint8_t *)base_ptr);
+    if (diff < 32)
+        lowfat_oob_error(info, ptr, base_ptr);
 }
 
 #if !defined(LOWFAT_DATA_ONLY) && !defined(LOWFAT_STANDALONE) && \

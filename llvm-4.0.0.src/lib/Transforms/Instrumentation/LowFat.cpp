@@ -1041,24 +1041,11 @@ static void insertBoundsCheck(const DataLayout *DL, Instruction *I, Value *Ptr,
         return;
     }
     Module *M = builder.GetInsertBlock()->getParent()->getParent();
-    size_t size = 0;
-    if (option_check_whole_access &&
-            (info == LOWFAT_OOB_ERROR_READ || info == LOWFAT_OOB_ERROR_WRITE))
-    {
-        Type *Ty = Ptr->getType();
-        if (auto *PtrTy = dyn_cast<PointerType>(Ty))
-        {
-            Ty = PtrTy->getElementType();
-            size = DL->getTypeAllocSize(Ty)-1;
-        }
-    }
-    Value *Size = builder.getInt64(size);
     Ptr = builder.CreateBitCast(Ptr, builder.getInt8PtrTy());
     Value *BoundsCheck = M->getOrInsertFunction("lowfat_oob_check",
         builder.getVoidTy(), builder.getInt32Ty(), builder.getInt8PtrTy(),
-        builder.getInt64Ty(), builder.getInt8PtrTy(), nullptr);
-    builder.CreateCall(BoundsCheck,
-        {builder.getInt32(info), Ptr, Size, BasePtr});
+        nullptr);
+    builder.CreateCall(BoundsCheck, {builder.getInt32(info), Ptr});
 }
 
 /*
@@ -1162,61 +1149,61 @@ static void addLowFatFuncs(Module *M)
     }
 
     F = M->getFunction("lowfat_oob_check");
-    if (F != nullptr)
-    {
-        BasicBlock *Entry  = BasicBlock::Create(M->getContext(), "", F);
-        BasicBlock *Error  = BasicBlock::Create(M->getContext(), "", F);
-        BasicBlock *Return = BasicBlock::Create(M->getContext(), "", F);
+    // if (F != nullptr)
+    // {
+    //     BasicBlock *Entry  = BasicBlock::Create(M->getContext(), "", F);
+    //     BasicBlock *Error  = BasicBlock::Create(M->getContext(), "", F);
+    //     BasicBlock *Return = BasicBlock::Create(M->getContext(), "", F);
         
-        IRBuilder<> builder(Entry);
-        auto i = F->getArgumentList().begin();
-        Value *Info = &(*(i++));
-        Value *Ptr = &(*(i++));
-        Value *AccessSize = &(*(i++));
-        Value *BasePtr = &(*(i++));
-        Value *IBasePtr = builder.CreatePtrToInt(BasePtr,
-            builder.getInt64Ty());
-        Value *Idx = builder.CreateLShr(IBasePtr,
-            builder.getInt64(LOWFAT_REGION_SIZE_SHIFT));
-        Value *Sizes = builder.CreateIntToPtr(
-            builder.getInt64((uint64_t)_LOWFAT_SIZES),
-            builder.getInt64Ty()->getPointerTo());
-        Value *SizePtr = builder.CreateGEP(Sizes, Idx);
-        Value *Size = builder.CreateAlignedLoad(SizePtr, sizeof(size_t));
+    //     IRBuilder<> builder(Entry);
+    //     auto i = F->getArgumentList().begin();
+    //     Value *Info = &(*(i++));
+    //     Value *Ptr = &(*(i++));
+    //     Value *AccessSize = &(*(i++));
+    //     Value *BasePtr = &(*(i++));
+    //     Value *IBasePtr = builder.CreatePtrToInt(BasePtr,
+    //         builder.getInt64Ty());
+    //     Value *Idx = builder.CreateLShr(IBasePtr,
+    //         builder.getInt64(LOWFAT_REGION_SIZE_SHIFT));
+    //     Value *Sizes = builder.CreateIntToPtr(
+    //         builder.getInt64((uint64_t)_LOWFAT_SIZES),
+    //         builder.getInt64Ty()->getPointerTo());
+    //     Value *SizePtr = builder.CreateGEP(Sizes, Idx);
+    //     Value *Size = builder.CreateAlignedLoad(SizePtr, sizeof(size_t));
         
-        // The check is: if (ptr - base > size - sizeof(*ptr)) error();
-        Value *IPtr = builder.CreatePtrToInt(Ptr, builder.getInt64Ty());
-        Value *Diff = builder.CreateSub(IPtr, IBasePtr);
-        Size = builder.CreateSub(Size, AccessSize);
-        Value *Cmp = builder.CreateICmpUGE(Diff, Size);
-        builder.CreateCondBr(Cmp, Error, Return);
+    //     // The check is: if (ptr - base > size - sizeof(*ptr)) error();
+    //     Value *IPtr = builder.CreatePtrToInt(Ptr, builder.getInt64Ty());
+    //     Value *Diff = builder.CreateSub(IPtr, IBasePtr);
+    //     Size = builder.CreateSub(Size, AccessSize);
+    //     Value *Cmp = builder.CreateICmpUGE(Diff, Size);
+    //     builder.CreateCondBr(Cmp, Error, Return);
         
-        IRBuilder<> builder2(Error);
-        if (!option_no_abort)
-        {
-            Value *Error = M->getOrInsertFunction("lowfat_oob_error",
-                builder2.getVoidTy(), builder2.getInt32Ty(),
-                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
-            CallInst *Call = builder2.CreateCall(Error, {Info, Ptr, BasePtr});
-            Call->setDoesNotReturn();
-            builder2.CreateUnreachable();
-        }
-        else
-        {
-            Value *Warning = M->getOrInsertFunction("lowfat_oob_warning",
-                builder2.getVoidTy(), builder2.getInt32Ty(),
-                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
-            builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
-            builder2.CreateRetVoid();
-        }
+    //     IRBuilder<> builder2(Error);
+    //     if (!option_no_abort)
+    //     {
+    //         Value *Error = M->getOrInsertFunction("lowfat_oob_error",
+    //             builder2.getVoidTy(), builder2.getInt32Ty(),
+    //             builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+    //         CallInst *Call = builder2.CreateCall(Error, {Info, Ptr, BasePtr});
+    //         Call->setDoesNotReturn();
+    //         builder2.CreateUnreachable();
+    //     }
+    //     else
+    //     {
+    //         Value *Warning = M->getOrInsertFunction("lowfat_oob_warning",
+    //             builder2.getVoidTy(), builder2.getInt32Ty(),
+    //             builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+    //         builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
+    //         builder2.CreateRetVoid();
+    //     }
 
-        IRBuilder<> builder3(Return);
-        builder3.CreateRetVoid();
+    //     IRBuilder<> builder3(Return);
+    //     builder3.CreateRetVoid();
 
-        F->setDoesNotThrow();
-        F->setLinkage(GlobalValue::InternalLinkage);
-        F->addFnAttr(llvm::Attribute::AlwaysInline);
-    }
+    //     F->setDoesNotThrow();
+    //     F->setLinkage(GlobalValue::InternalLinkage);
+    //     F->addFnAttr(llvm::Attribute::AlwaysInline);
+    // }
 
     F = M->getFunction("lowfat_stack_allocsize");
     if (F != nullptr)
@@ -1720,6 +1707,7 @@ struct LowFat : public ModulePass
             BoundsInfo boundsInfo;
             for (auto &BB: F)
                 for (auto &I: BB)
+                    // TODO: make context switch as not interesting
                     getInterestingInsts(&TLI, DL, boundsInfo, &I, plan);
 
             // STEP #2: Calculate the base pointers:
@@ -1763,17 +1751,18 @@ struct LowFat : public ModulePass
         addLowFatFuncs(&M);
 
         // PASS (4): Optimize lowfat_malloc() calls
-        for (auto &F: M)
-        {
-            if (F.isDeclaration())
-                continue;
-            vector<Instruction *> dels;
-            for (auto &BB: F)
-                for (auto &I: BB)
-                    optimizeMalloc(&M, &I, dels);
-            for (auto &I: dels)
-                I->eraseFromParent();
-        }
+        // Disable now because we have to use lowfat_malloc()
+        // for (auto &F: M)
+        // {
+        //     if (F.isDeclaration())
+        //         continue;
+        //     vector<Instruction *> dels;
+        //     for (auto &BB: F)
+        //         for (auto &I: BB)
+        //             optimizeMalloc(&M, &I, dels);
+        //     for (auto &I: dels)
+        //         I->eraseFromParent();
+        // }
 
         if (option_debug)
         {
