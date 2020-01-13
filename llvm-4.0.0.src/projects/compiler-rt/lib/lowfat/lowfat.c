@@ -504,6 +504,9 @@ extern void lowfat_oob_warning(unsigned info,
 
 extern void lowfat_oob_check(unsigned info, const void *ptr)
 {   
+    // prevent check for nonfat pointers
+    if (!lowfat_is_ptr(ptr))
+        return;
     void *base_ptr = lowfat_base(ptr);
     size_t diff = (size_t)((const uint8_t *)ptr - (const uint8_t *)base_ptr);
     if (diff < 32)
