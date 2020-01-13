@@ -308,8 +308,10 @@ extern void *lowfat_realloc(void *ptr, size_t size)
     // (1) Check for cheap exits:
     if (ptr == NULL || size == 0)
         return lowfat_malloc(size);
+    // real size should be used for selecting new lowfat region
+    size_t real_size = size + 32;
     if (lowfat_is_ptr(ptr) &&
-        lowfat_index(ptr) == lowfat_heap_select(size))
+        lowfat_index(ptr) == lowfat_heap_select(real_size))
     {
 #ifndef LOWFAT_NO_PROTECT
         // `ptr' and `size' map to the same region; allocation can be avoided.
@@ -323,8 +325,9 @@ extern void *lowfat_realloc(void *ptr, size_t size)
 #endif      /* LOWFAT_NO_PROTECT */
         return ptr;
     }
+    // TODO: may consider using the fallback method without 32 bytes padding
     if (!lowfat_is_ptr(ptr))
-        return lowfat_fallback_realloc(ptr, size);
+        return lowfat_fallback_realloc(ptr, real_size);
 
     // (2) Do the reallocation + copy:
     void *newptr = lowfat_malloc(size);
@@ -333,7 +336,8 @@ extern void *lowfat_realloc(void *ptr, size_t size)
     size_t cpy_size;
     size_t idx = lowfat_index(ptr);
     size_t ptr_size = LOWFAT_SIZES[idx];
-    cpy_size = (size < ptr_size? size: ptr_size);
+    size_t content_size = ptr_size - 32;
+    cpy_size = (size < content_size? size: content_size);
 #ifndef LOWFAT_NO_PROTECT
     if (ptr_size >= LOWFAT_BIG_OBJECT)
     {
@@ -490,7 +494,8 @@ typedef size_t (*malloc_usable_size_t)(void *);
 extern size_t malloc_usable_size(void *ptr)
 {
     if (lowfat_is_ptr(ptr))
-        return lowfat_size(ptr);
+        // the usable size is now smaller than the allocation size
+        return lowfat_size(ptr) - 32;
     static malloc_usable_size_t libc_malloc_usable_size = NULL;
     if (libc_malloc_usable_size == NULL)
     {
