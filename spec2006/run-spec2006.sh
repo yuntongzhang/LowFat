@@ -175,7 +175,8 @@ then
     FC=echo
 fi
 
-COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -g -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes"
+COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes"
+# COMMON_FLAGS=""
 CC="$CC    -std=gnu89 $COMMON_FLAGS"
 CXX="$CXX             $COMMON_FLAGS"
 FC="$FC     $COMMON_FLAGS"

@@ -148,7 +148,7 @@ static Value *calcBasePtr(const TargetLibraryInfo *TLI, Function *F,
 static void getInterestingInsts(const TargetLibraryInfo *TL,
     const DataLayout *DL, BoundsInfo &boundsInfo, Instruction *I, Plan &plan);
 static void insertBoundsCheck(const DataLayout *DL, Instruction *I, Value *Ptr,
-    unsigned info, const PtrInfo &baseInfo);
+    unsigned info);
 static bool isInterestingAlloca(Instruction *I);
 static bool isInterestingGlobal(GlobalVariable *GV);
 
@@ -906,27 +906,28 @@ static void getInterestingInsts(const TargetLibraryInfo *TLI,
         Ptr = Load->getPointerOperand();
         kind = LOWFAT_OOB_ERROR_READ;
     }
-    else if (MemTransferInst *MI = dyn_cast<MemTransferInst>(I))
-    {
-        if (filterPtr(LOWFAT_OOB_ERROR_MEMCPY))
-            return;
-        IRBuilder<> builder(MI);
-        Value *Src = builder.CreateBitCast(MI->getOperand(1),
-            builder.getInt8PtrTy());
-        Value *SrcEnd = builder.CreateGEP(Src,
-            builder.CreateIntCast(MI->getOperand(2), builder.getInt64Ty(),
-                false));
-        addToPlan(TLI, DL, boundsInfo, plan, I, SrcEnd,
-            LOWFAT_OOB_ERROR_MEMCPY);
-        Value *Dst = builder.CreateBitCast(MI->getOperand(0),
-            builder.getInt8PtrTy());
-        Value *DstEnd = builder.CreateGEP(Dst,
-            builder.CreateIntCast(MI->getOperand(2), builder.getInt64Ty(),
-                false));
-        addToPlan(TLI, DL, boundsInfo, plan, I, DstEnd,
-            LOWFAT_OOB_ERROR_MEMCPY);
-        return;
-    }
+    // FOR NOW: disable memcpy due to the 4 errors in SPEC2006 (memcpy with NULL)
+    // else if (MemTransferInst *MI = dyn_cast<MemTransferInst>(I))
+    // {
+    //     if (filterPtr(LOWFAT_OOB_ERROR_MEMCPY))
+    //         return;
+    //     IRBuilder<> builder(MI);
+    //     Value *Src = builder.CreateBitCast(MI->getOperand(1),
+    //         builder.getInt8PtrTy());
+    //     Value *SrcEnd = builder.CreateGEP(Src,
+    //         builder.CreateIntCast(MI->getOperand(2), builder.getInt64Ty(),
+    //             false));
+    //     addToPlan(TLI, DL, boundsInfo, plan, I, SrcEnd,
+    //         LOWFAT_OOB_ERROR_MEMCPY);
+    //     Value *Dst = builder.CreateBitCast(MI->getOperand(0),
+    //         builder.getInt8PtrTy());
+    //     Value *DstEnd = builder.CreateGEP(Dst,
+    //         builder.CreateIntCast(MI->getOperand(2), builder.getInt64Ty(),
+    //             false));
+    //     addToPlan(TLI, DL, boundsInfo, plan, I, DstEnd,
+    //         LOWFAT_OOB_ERROR_MEMCPY);
+    //     return;
+    // }
     else if (MemSetInst *MI = dyn_cast<MemSetInst>(I))
     {
         if (filterPtr(LOWFAT_OOB_ERROR_MEMSET))
@@ -1020,26 +1021,9 @@ static void getInterestingInsts(const TargetLibraryInfo *TLI,
  * Insert a bounds check before instruction `I'.
  */
 static void insertBoundsCheck(const DataLayout *DL, Instruction *I, Value *Ptr,
-    unsigned info, const PtrInfo &baseInfo)
+    unsigned info)
 {
     IRBuilder<> builder(I);
-    auto i = baseInfo.find(Ptr);
-    if (i == baseInfo.end())
-    {
-        missing_baseptr_error:
-        Ptr->dump();
-        Ptr->getContext().diagnose(LowFatWarning(
-            "(BUG) missing base pointer"));
-        return;
-    }
-    Value *BasePtr = i->second;
-    if (BasePtr == nullptr)
-        goto missing_baseptr_error;
-    if (isa<ConstantPointerNull>(BasePtr))
-    {
-        // This is a nonfat pointer.
-        return;
-    }
     Module *M = builder.GetInsertBlock()->getParent()->getParent();
     Ptr = builder.CreateBitCast(Ptr, builder.getInt8PtrTy());
     Value *BoundsCheck = M->getOrInsertFunction("lowfat_oob_check",
@@ -1107,14 +1091,19 @@ static void replaceUnsafeLibFuncs(Module *M)
  * versions.
  */
 static void addLowFatFuncs(Module *M)
-{
-    Function *F = M->getFunction("lowfat_base");
+{   
+    Function *F = M->getFunction("lowfat_oob_check");
     if (F != nullptr)
     {
-        BasicBlock *Entry = BasicBlock::Create(M->getContext(), "", F);
+        BasicBlock *Entry  = BasicBlock::Create(M->getContext(), "", F);
+        BasicBlock *Error  = BasicBlock::Create(M->getContext(), "", F);
+        BasicBlock *Return = BasicBlock::Create(M->getContext(), "", F);
+        
         IRBuilder<> builder(Entry);
+        auto i = F->getArgumentList().begin();
+        Value *Info = &(*(i++));
+        Value *Ptr = &(*(i++));
 
-        Value *Ptr = &F->getArgumentList().front();
         Value *Magics = builder.CreateIntToPtr(
             builder.getInt64((uint64_t)_LOWFAT_MAGICS),
             builder.getInt64Ty()->getPointerTo());
@@ -1140,70 +1129,40 @@ static void addLowFatFuncs(Module *M)
 #endif
         Value *BasePtr = builder.CreateIntToPtr(IBasePtr,
             builder.getInt8PtrTy());
-        builder.CreateRet(BasePtr);
- 
-        F->setOnlyReadsMemory();
+
+        // The new check is: if (ptr - base < 32) error();
+        Value *Diff = builder.CreateSub(IPtr, IBasePtr);
+        // TODO: remove magic number
+        Value *Cmp = builder.CreateICmpULT(Diff, builder.getInt64((uint64_t) 32));
+        builder.CreateCondBr(Cmp, Error, Return);
+
+        
+        IRBuilder<> builder2(Error);
+        if (!option_no_abort)
+        {
+            Value *Error = M->getOrInsertFunction("lowfat_oob_error",
+                builder2.getVoidTy(), builder2.getInt32Ty(),
+                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+            CallInst *Call = builder2.CreateCall(Error, {Info, Ptr, BasePtr});
+            Call->setDoesNotReturn();
+            builder2.CreateUnreachable();
+        }
+        else
+        {
+            Value *Warning = M->getOrInsertFunction("lowfat_oob_warning",
+                builder2.getVoidTy(), builder2.getInt32Ty(),
+                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+            builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
+            builder2.CreateRetVoid();
+        }
+
+        IRBuilder<> builder3(Return);
+        builder3.CreateRetVoid();
+
         F->setDoesNotThrow();
         F->setLinkage(GlobalValue::InternalLinkage);
         F->addFnAttr(llvm::Attribute::AlwaysInline);
     }
-
-    F = M->getFunction("lowfat_oob_check");
-    // if (F != nullptr)
-    // {
-    //     BasicBlock *Entry  = BasicBlock::Create(M->getContext(), "", F);
-    //     BasicBlock *Error  = BasicBlock::Create(M->getContext(), "", F);
-    //     BasicBlock *Return = BasicBlock::Create(M->getContext(), "", F);
-        
-    //     IRBuilder<> builder(Entry);
-    //     auto i = F->getArgumentList().begin();
-    //     Value *Info = &(*(i++));
-    //     Value *Ptr = &(*(i++));
-    //     Value *AccessSize = &(*(i++));
-    //     Value *BasePtr = &(*(i++));
-    //     Value *IBasePtr = builder.CreatePtrToInt(BasePtr,
-    //         builder.getInt64Ty());
-    //     Value *Idx = builder.CreateLShr(IBasePtr,
-    //         builder.getInt64(LOWFAT_REGION_SIZE_SHIFT));
-    //     Value *Sizes = builder.CreateIntToPtr(
-    //         builder.getInt64((uint64_t)_LOWFAT_SIZES),
-    //         builder.getInt64Ty()->getPointerTo());
-    //     Value *SizePtr = builder.CreateGEP(Sizes, Idx);
-    //     Value *Size = builder.CreateAlignedLoad(SizePtr, sizeof(size_t));
-        
-    //     // The check is: if (ptr - base > size - sizeof(*ptr)) error();
-    //     Value *IPtr = builder.CreatePtrToInt(Ptr, builder.getInt64Ty());
-    //     Value *Diff = builder.CreateSub(IPtr, IBasePtr);
-    //     Size = builder.CreateSub(Size, AccessSize);
-    //     Value *Cmp = builder.CreateICmpUGE(Diff, Size);
-    //     builder.CreateCondBr(Cmp, Error, Return);
-        
-    //     IRBuilder<> builder2(Error);
-    //     if (!option_no_abort)
-    //     {
-    //         Value *Error = M->getOrInsertFunction("lowfat_oob_error",
-    //             builder2.getVoidTy(), builder2.getInt32Ty(),
-    //             builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
-    //         CallInst *Call = builder2.CreateCall(Error, {Info, Ptr, BasePtr});
-    //         Call->setDoesNotReturn();
-    //         builder2.CreateUnreachable();
-    //     }
-    //     else
-    //     {
-    //         Value *Warning = M->getOrInsertFunction("lowfat_oob_warning",
-    //             builder2.getVoidTy(), builder2.getInt32Ty(),
-    //             builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
-    //         builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
-    //         builder2.CreateRetVoid();
-    //     }
-
-    //     IRBuilder<> builder3(Return);
-    //     builder3.CreateRetVoid();
-
-    //     F->setDoesNotThrow();
-    //     F->setLinkage(GlobalValue::InternalLinkage);
-    //     F->addFnAttr(llvm::Attribute::AlwaysInline);
-    // }
 
     F = M->getFunction("lowfat_stack_allocsize");
     if (F != nullptr)
@@ -1710,15 +1669,9 @@ struct LowFat : public ModulePass
                     // TODO: make context switch as not interesting
                     getInterestingInsts(&TLI, DL, boundsInfo, &I, plan);
 
-            // STEP #2: Calculate the base pointers:
-            PtrInfo baseInfo;
+            // STEP #2: Add the bounds check:
             for (auto &p: plan)
-                (void)calcBasePtr(&TLI, &F, get<1>(p), baseInfo);
-
-            // STEP #3: Add the bounds check:
-            for (auto &p: plan)
-                insertBoundsCheck(DL, get<0>(p), get<1>(p), get<2>(p),
-                    baseInfo);
+                insertBoundsCheck(DL, get<0>(p), get<1>(p), get<2>(p));
         }
 
         // PASS (1a) Stack object lowfatification
@@ -1751,7 +1704,7 @@ struct LowFat : public ModulePass
         addLowFatFuncs(&M);
 
         // PASS (4): Optimize lowfat_malloc() calls
-        // Disable now because we have to use lowfat_malloc()
+        // FOR NOW: Disable because we have to use lowfat_malloc()
         // for (auto &F: M)
         // {
         //     if (F.isDeclaration())
