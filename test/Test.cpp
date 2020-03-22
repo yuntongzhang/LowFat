@@ -30,6 +30,8 @@
 #include <unistd.h>
 
 #include <lowfat.h>
+#include <lowfat_config.c>
+#include <lowfat_config.h>
 
 #define NOINLINE    __attribute__((__noinline__))
 
@@ -154,10 +156,14 @@ static NOINLINE T testBuffer(T *xs)
     printf("\n\33[35m*** BUFFER xs=%p (%s), SIZE=%d, T=(uint%zu_t) "
         "thread=%s ***\33[0m\n",
         (void *)xs, kind, SIZE, sizeof(T) * 8, (thread? "true": "false"));
-    const int END = 2 * SIZE + 1;
+    // END points to the last position in the neighbouring redzone
+    const int region_idx = lowfat_heap_select(sizeof(T) * SIZE + 32);
+    const int END = _LOWFAT_SIZES[region_idx] / sizeof(T) - 1;
     TEST(memset(xs, 0, SIZE * sizeof(T)), 0);
+#ifdef FULL_MODE
     TEST(memcpy(buf, (void *)xs, SIZE * sizeof(T)), 0);
     TEST(memcpy(buf, (void *)xs, END * sizeof(T)), NUM);
+#endif 
     for (int i = 0; i < SIZE; i++)
         TEST(xs[i] = i, 0);
     T sum = 0;
@@ -173,6 +179,7 @@ static NOINLINE T testBuffer(T *xs)
         TEST(sum += get<T>((xs+SIZE/2), i-(SIZE/2+1)), (i == 0? NUM: 0));
     for (int i = 0; i < SIZE; i++)
         TEST(set<T>(xs, i, 3), 0);
+#ifdef FULL_MODE
     TEST(escape<T>(xs), 0);
     TEST(escape<T>(xs+SIZE/2), 0);
     TEST(escape<T>(xs-1), NUM);
@@ -191,6 +198,7 @@ static NOINLINE T testBuffer(T *xs)
     TEST(*ptr = (xs+SIZE/2), 0);
     TEST(*ptr = (xs-1), NUM);
     TEST(*ptr = (xs+END), NUM);
+#endif
     return sum;
 }
 
@@ -204,13 +212,16 @@ static NOINLINE T testField(Test<T> &t)
     T sum = 0;
     TEST(sum += t.f1, 0);
     TEST(sum += t.f2, 0);
-    TEST(sum += t.f8, NUM);
+    // f6 is in redzone for both uint32 and uint64
+    TEST(sum += t.f6, NUM);
     TEST(sum += get<T>(&t.f1, 0), 0);
     TEST(sum += get<T>(&t.f2, 0), 0);
     TEST(sum += get<T>(&t.f1, 1), 0);
     TEST(sum += get<T>(&t.f2, -1), 0);
-    TEST(sum += get<T>(&t.f1, 7), NUM);
-    TEST(sum += get<T>(&t.f8, -7), 2 * NUM);
+    TEST(sum += get<T>(&t.f1, 5), NUM);
+    TEST(sum += get<T>(&t.f8, -2), NUM);
+    TEST(sum += get<T>(&t.f8, -7), 0);
+#ifdef FULL_MODE
     TEST(escape<T>(&t.f1), 0);
     TEST(escape<T>(&t.f8), NUM);
     TEST(doreturn<T>(&t.f1, 0), 0);
@@ -221,6 +232,7 @@ static NOINLINE T testField(Test<T> &t)
     TEST(i = (uintptr_t)&t.f8, NUM); escape(i);
     TEST(*ptr = &t.f1, 0);
     TEST(*ptr = &t.f8, NUM);
+#endif
     return sum;
 }
 
@@ -230,7 +242,7 @@ static NOINLINE uint64_t testEdge(void *ptr)
     unsigned NUM = (lowfat_is_ptr(ptr)? 1: 0);
     uint8_t *end = nullptr;
     if (lowfat_is_ptr(ptr))
-        end = (uint8_t *)ptr + lowfat_size(ptr);
+        end = (uint8_t *)ptr - 32 + lowfat_size(ptr);
     else
         end = (uint8_t *)ptr + 16;
     printf("\n\33[35m*** EDGE base=%p (%s) end=%p, thread=%s ***\33[0m\n",
@@ -277,7 +289,7 @@ static NOINLINE size_t testString(const char *str)
             break;
         sum += c;
     }
-    int len = (lowfat_is_ptr(str)? lowfat_size(str): 8);
+    int len = (lowfat_is_ptr(str)? lowfat_size(str)-32 : 8);
     for (int i = -3, j = 0; i < len+3; i++, j++)
     {
         unsigned NUM2 = (i >= 0 && i < len? 0: NUM);
@@ -289,6 +301,7 @@ static NOINLINE size_t testString(const char *str)
 static void *worker(void *arg)
 {
     uint32_t sum = 0;
+    // 8 + 32 = 40 -> 48
     {
         const int SIZE = 8;
         uint8_t *xs = (uint8_t *)__libc_malloc(SIZE * sizeof(uint8_t));
@@ -296,6 +309,7 @@ static void *worker(void *arg)
         TEST_KIND(xs, nonfat);
         free(xs);
     }
+    // 8 + 32 = 40 -> 48
     {
         const int SIZE = 4;
         uint16_t *xs = (uint16_t *)__libc_malloc(SIZE * sizeof(uint16_t));
@@ -345,6 +359,7 @@ static void *worker(void *arg)
         TEST_KIND(xs, heap);
         free(xs);
     }
+#ifdef FULL_MODE
     {
         const int SIZE = 8;
         uint8_t xs[SIZE];
@@ -415,6 +430,7 @@ static void *worker(void *arg)
         sum += testBuffer<uint64_t, SIZE>(global4xi64);
         TEST_KIND(global4xi64, global);
     }
+#endif
     {
         Test<uint32_t> *t = (Test<uint32_t> *)__libc_malloc(8);
         sum += testField<uint32_t>(*t);
@@ -427,6 +443,7 @@ static void *worker(void *arg)
         TEST_KIND(t, nonfat);
         free(t);
     }
+    // malloc(8) -> allocate 40 -> region size is 48
     {
         Test<uint32_t> *t = (Test<uint32_t> *)malloc(8);
         sum += testField<uint32_t>(*t);
@@ -439,6 +456,7 @@ static void *worker(void *arg)
         TEST_KIND(t, heap);
         free(t);
     }
+#ifdef FULL_MODE
     {
         char tmp[8];
         Test<uint32_t> *t = (Test<uint32_t> *)tmp;
@@ -475,6 +493,7 @@ static void *worker(void *arg)
         sum += testField<uint64_t>(*t);
         TEST_KIND(t, global);
     }
+// does not work in redzone LowFat
     {
         void *ptr = __libc_malloc(8);
         sum += testEdge(ptr);
@@ -503,6 +522,7 @@ static void *worker(void *arg)
         sum += testEdge((void *)global8xi8);
         TEST_KIND(global8xi8, global);
     }
+#endif
     {
         char *str = (char *)__libc_malloc(15);
         strcpy(str, "Hello World!");
@@ -517,6 +537,7 @@ static void *worker(void *arg)
         TEST_KIND(str, heap);
         free(str);
     }
+#ifdef FULL_MODE
     {
         char str[] = "Hello World!";
         sum += testString(str);
@@ -527,7 +548,7 @@ static void *worker(void *arg)
         sum += testString(str);
         TEST_KIND(str, global);
     }
-
+#endif
     return (void *)(uintptr_t)sum;
 }
 

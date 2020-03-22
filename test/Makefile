@@ -2,7 +2,8 @@ CXX=../build/bin/clang++
 CXXFLAGS_0=-std=c++11 -O2 \
     -I ../llvm-4.0.0.src/projects/compiler-rt/lib/lowfat/ \
     -I ../config/ -mllvm -lowfat-no-abort -mllvm -lowfat-debug \
-    -mllvm -lowfat-check-whole-access
+    -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals \
+	-mllvm -lowfat-no-check-escapes
 CXXFLAGS=-fsanitize=lowfat $(CXXFLAGS_0)
 
 Test: Test.cpp
