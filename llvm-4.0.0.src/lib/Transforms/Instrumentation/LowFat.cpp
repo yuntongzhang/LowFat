@@ -869,20 +869,20 @@ static void addToPlan(const TargetLibraryInfo *TLI, const DataLayout *DL,
 {
     if (filterPtr(kind))
         return;
-    Bounds bounds = getPtrBounds(TLI, DL, Ptr, boundsInfo);
-    size_t size = 0;
-    if (option_check_whole_access &&
-            (kind == LOWFAT_OOB_ERROR_READ || kind == LOWFAT_OOB_ERROR_WRITE))
-    {
-        Type *Ty = Ptr->getType();
-        if (auto *PtrTy = dyn_cast<PointerType>(Ty))
-        {
-            Ty = PtrTy->getElementType();
-            size = DL->getTypeAllocSize(Ty);
-        }
-    }
-    if (bounds.isInBounds(size))
-        return;
+    // Bounds bounds = getPtrBounds(TLI, DL, Ptr, boundsInfo);
+    // size_t size = 0;
+    // if (option_check_whole_access &&
+    //         (kind == LOWFAT_OOB_ERROR_READ || kind == LOWFAT_OOB_ERROR_WRITE))
+    // {
+    //     Type *Ty = Ptr->getType();
+    //     if (auto *PtrTy = dyn_cast<PointerType>(Ty))
+    //     {
+    //         Ty = PtrTy->getElementType();
+    //         size = DL->getTypeAllocSize(Ty);
+    //     }
+    // }
+    // if (bounds.isInBounds(size))
+    //     return;
     plan.push_back(make_tuple(I, Ptr, kind));
 }
 static void getInterestingInsts(const TargetLibraryInfo *TLI,
