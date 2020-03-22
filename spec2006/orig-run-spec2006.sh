@@ -168,6 +168,7 @@ SPEC_J=${SPEC_J:-4}
 NUM_RUNS=${NUM_RUNS:-1}
 CC=$LOWFAT_PATH/build/bin/clang
 CXX=$LOWFAT_PATH/build/bin/clang++
+BL=$LOWFAT_PATH/blacklist.txt
 BIT=${BIT:-64}
 OPT_LEVEL=${OPT_LEVEL:-"-O2"}
 rm -rf config/$NAME.*
@@ -176,7 +177,7 @@ then
     FC=echo
 fi
 
-COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -g -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes"
+COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes -mllvm -lowfat-no-check-blacklist=$BL"
 CC="$CC    -std=gnu89 $COMMON_FLAGS"
 CXX="$CXX             $COMMON_FLAGS"
 FC="$FC     $COMMON_FLAGS"
