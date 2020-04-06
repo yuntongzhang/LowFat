@@ -1103,18 +1103,60 @@ static void addLowFatFuncs(Module *M)
         auto i = F->getArgumentList().begin();
         Value *Info = &(*(i++));
         Value *Ptr = &(*(i++));
-
-        Value *Magics = builder.CreateIntToPtr(
-            builder.getInt64((uint64_t)_LOWFAT_MAGICS),
-            builder.getInt64Ty()->getPointerTo());
+        
+        // get lowfat region index
         Value *IPtr = builder.CreatePtrToInt(Ptr, builder.getInt64Ty());
         Value *Idx = builder.CreateLShr(IPtr,
             builder.getInt64(LOWFAT_REGION_SIZE_SHIFT));
+
+#if LOWFAT_IS_POW2
+        // base calculation is not needed for pow2
+        Value *RedzoneMasks = builder.CreateIntToPtr(
+            builder.getInt64((uint64_t)_REDZONE_MASKS),
+            builder.getInt64Ty()->getPointerTo());
+        Value *RedzoneMaskPtr = builder.CreateGEP(RedzoneMasks, Idx);
+        Value *RedzoneMask = builder.CreateAlignedLoad(
+            RedzoneMaskPtr, sizeof(size_t));
+        // pow2 check is: if (ptr AND mask == 0) error();
+        Value *AndResult = builder.CreateAnd(IPtr, RedzoneMask);
+        Value *Cmp = builder.CreateICmpEQ(AndResult, builder.getInt64(0));
+        builder.CreateCondBr(Cmp, Error, Return);
+
+
+        IRBuilder<> builder2(Error);
+        // for pow2, only calculate base when there is an error
+        Value *Magics = builder2.CreateIntToPtr(
+            builder2.getInt64((uint64_t)_LOWFAT_MAGICS),
+            builder2.getInt64Ty()->getPointerTo());
+        Value *MagicPtr = builder2.CreateGEP(Magics, Idx);
+        Value *Magic = builder2.CreateAlignedLoad(MagicPtr, sizeof(size_t));
+        Value *IBasePtr = builder2.CreateAnd(IPtr, Magic);
+        Value *BasePtr = builder2.CreateIntToPtr(IBasePtr,
+            builder2.getInt8PtrTy());
+        if (!option_no_abort)
+        {
+            Value *Error = M->getOrInsertFunction("lowfat_oob_error",
+                builder2.getVoidTy(), builder2.getInt32Ty(),
+                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+            CallInst *Call = builder2.CreateCall(Error, {Info, Ptr, BasePtr});
+            Call->setDoesNotReturn();
+            builder2.CreateUnreachable();
+        }
+        else
+        {
+            Value *Warning = M->getOrInsertFunction("lowfat_oob_warning",
+                builder2.getVoidTy(), builder2.getInt32Ty(),
+                builder2.getInt8PtrTy(), builder2.getInt8PtrTy(), nullptr);
+            builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
+            builder2.CreateRetVoid();
+        }
+#else
+        Value *Magics = builder.CreateIntToPtr(
+            builder.getInt64((uint64_t)_LOWFAT_MAGICS),
+            builder.getInt64Ty()->getPointerTo());
         Value *MagicPtr = builder.CreateGEP(Magics, Idx);
         Value *Magic = builder.CreateAlignedLoad(MagicPtr, sizeof(size_t));
-#if LOWFAT_IS_POW2
-        Value *IBasePtr = builder.CreateAnd(IPtr, Magic);
-#else
+
         Value *IPtr128 = builder.CreateZExt(IPtr, builder.getIntNTy(128));
         Value *Magic128 = builder.CreateZExt(Magic, builder.getIntNTy(128));
         Value *Tmp128 = builder.CreateMul(IPtr128, Magic128);
@@ -1126,7 +1168,6 @@ static void addLowFatFuncs(Module *M)
         Value *SizePtr = builder.CreateGEP(Sizes, Idx);
         Value *Size = builder.CreateAlignedLoad(SizePtr, sizeof(size_t));
         Value *IBasePtr = builder.CreateMul(ObjIdx, Size);
-#endif
         Value *BasePtr = builder.CreateIntToPtr(IBasePtr,
             builder.getInt8PtrTy());
 
@@ -1136,7 +1177,7 @@ static void addLowFatFuncs(Module *M)
         Value *Cmp = builder.CreateICmpULT(Diff, builder.getInt64((uint64_t) 32));
         builder.CreateCondBr(Cmp, Error, Return);
 
-        
+
         IRBuilder<> builder2(Error);
         if (!option_no_abort)
         {
@@ -1155,6 +1196,7 @@ static void addLowFatFuncs(Module *M)
             builder2.CreateCall(Warning, {Info, Ptr, BasePtr});
             builder2.CreateRetVoid();
         }
+#endif
 
         IRBuilder<> builder3(Return);
         builder3.CreateRetVoid();

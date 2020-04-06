@@ -40,6 +40,7 @@
 
 #define LOWFAT_SIZES            _LOWFAT_SIZES
 #define LOWFAT_MAGICS           _LOWFAT_MAGICS
+#define REDZONE_MASKS           _REDZONE_MASKS
 
 static LOWFAT_NOINLINE void lowfat_rand(void *buf, size_t len);
 static LOWFAT_CONST void *lowfat_region(size_t idx);
@@ -235,7 +236,7 @@ void LOWFAT_CONSTRUCTOR lowfat_init(void)
 
     // Init LOWFAT_SIZES and LOWFAT_MAGICS
     {
-        // Create LOWFAT_SIZES:
+        // Create LOWFAT_SIZES and REDZONE_MASKS:
         size_t total_pages = (LOWFAT_MAX_ADDRESS / LOWFAT_REGION_SIZE) /
             (LOWFAT_PAGE_SIZE / sizeof(size_t));
         size_t len = total_pages * LOWFAT_PAGE_SIZE;
@@ -245,6 +246,9 @@ void LOWFAT_CONSTRUCTOR lowfat_init(void)
             mmap_error:
             lowfat_error("failed to mmap memory: %s", strerror(errno));
         }
+        ptr = lowfat_map((void *)REDZONE_MASKS, len, true, true, -1);
+        if (ptr != (void *)REDZONE_MASKS)
+            goto mmap_error;
 
 #if !defined(LOWFAT_WINDOWS)
         int fd = lowfat_create_shm(LOWFAT_PAGE_SIZE);
@@ -252,6 +256,17 @@ void LOWFAT_CONSTRUCTOR lowfat_init(void)
             LOWFAT_SIZES_PAGES * LOWFAT_PAGE_SIZE;
         void *end = (uint8_t *)LOWFAT_SIZES + total_pages * LOWFAT_PAGE_SIZE;
         bool w = true;
+        while (start < end)
+        {
+            ptr = lowfat_map(start, LOWFAT_PAGE_SIZE, true, w, fd);
+            if (ptr != start)
+                goto mmap_error;
+            start = (uint8_t *)start + LOWFAT_PAGE_SIZE;
+            w = false;
+        }
+        start = (uint8_t *)REDZONE_MASKS + LOWFAT_SIZES_PAGES * LOWFAT_PAGE_SIZE;
+        end = (uint8_t *)REDZONE_MASKS + total_pages * LOWFAT_PAGE_SIZE;
+        w = true;
         while (start < end)
         {
             ptr = lowfat_map(start, LOWFAT_PAGE_SIZE, true, w, fd);
@@ -276,7 +291,7 @@ void LOWFAT_CONSTRUCTOR lowfat_init(void)
         if (ptr != (void *)LOWFAT_MAGICS)
             goto mmap_error;
 
-        // Init LOWFAT_SIZES and LOWFAT_MAGICS data:
+        // Init LOWFAT_SIZES, REDZONE_MASKS and LOWFAT_MAGICS data:
         size_t i = 0;
         LOWFAT_SIZES[i++] = SIZE_MAX;
         size_t sizes_len = sizeof(lowfat_sizes) / sizeof(lowfat_sizes[0]);
@@ -287,14 +302,23 @@ void LOWFAT_CONSTRUCTOR lowfat_init(void)
         for (size_t j = 0; j < size_init_len / sizeof(size_t); j++)
             LOWFAT_SIZES[i++] = SIZE_MAX;
         i = 0;
+        REDZONE_MASKS[i++] = UINT64_MAX;
+        for (size_t j = 0; j < sizes_len; j++)
+            REDZONE_MASKS[i++] = redzone_masks[j];
+        while (((uintptr_t)(REDZONE_MASKS + i) % LOWFAT_PAGE_SIZE) != 0)
+            REDZONE_MASKS[i++] = UINT64_MAX;
+        for (size_t j = 0; j < size_init_len / sizeof(size_t); j++)
+            REDZONE_MASKS[i++] = UINT64_MAX;
+        i = 0;
         LOWFAT_MAGICS[i++] = 0;
         for (size_t j = 0; j < sizes_len; j++)
             LOWFAT_MAGICS[i++] = lowfat_magics[j];
         while (((uintptr_t)(LOWFAT_MAGICS + i) % LOWFAT_PAGE_SIZE) != 0)
             LOWFAT_MAGICS[i++] = 0;
-
+        
         if (!lowfat_protect((void *)LOWFAT_SIZES, len, true, false) ||
-            !lowfat_protect((void *)LOWFAT_MAGICS, len, true, false))
+            !lowfat_protect((void *)LOWFAT_MAGICS, len, true, false) ||
+            !lowfat_protect((void *)REDZONE_MASKS, len, true, false))
             lowfat_error("failed to write protect memory: %s",
                 strerror(errno));
     }

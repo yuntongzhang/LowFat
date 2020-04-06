@@ -44,6 +44,7 @@
 #define ASLR_MASK               0xFFFFFFFF
 #define LOWFAT_SIZES            0x200000
 #define LOWFAT_MAGICS           0x300000
+#define REDZONE_MASKS           0x350000
 #define CPUID(a, c, ax, bx, cx, dx)                                         \
     __asm__ __volatile__ ("cpuid" : "=a" (ax), "=b" (bx), "=c" (cx),        \
         "=d" (dx) : "a" (a), "c" (c))
@@ -200,8 +201,8 @@ static void spawn_error_worker(pthread_t *thread, pthread_mutex_t *lock,
 }
 
 static void compile(FILE *stream, FILE *hdr_stream, FILE *ld_stream,
-    size_t *sizes, size_t *magics, size_t *errors, size_t region_size,
-    size_t sizes_len, bool pow2, bool legacy);
+    size_t *sizes, size_t *magics, size_t *redzone_masks, size_t *errors, 
+    size_t region_size, size_t sizes_len, bool pow2, bool legacy);
 
 #define OPTION_NO_ERROR_GEN             1
 #define OPTION_NO_MEMORY_ALIAS          2
@@ -431,6 +432,33 @@ int main(int argc, char **argv)
         }
     }
 
+    // Calculate redzone masks:
+    size_t redzone_masks[sizes_len];
+    // redzone masks do not work for non-pow2
+    if (!ispow2)
+    {
+        for (size_t i = 0; i < sizes_len; i++)
+        {
+            redzone_masks[i] = UINT64_MAX;
+            printf("Region #%zu: size=%zu redzone_mask=0x%.16zX\n", i+1, sizes[i],
+                redzone_masks[i]);
+        }
+    }
+    else 
+    {   
+        for (size_t i = 0; i < sizes_len; i++)
+        {   
+            // the 16 and 32 bytes region will not be used in redzone-lowfat
+            if (sizes[i] <= 32) {
+                redzone_masks[i] = UINT64_MAX;
+            } else {
+                redzone_masks[i] = ((sizes[i] >> 5) - 1) << 5;
+            }
+            printf("Region #%zu: size=%zu redzone_mask=0x%.16zX\n", i+1, sizes[i],
+                redzone_masks[i]);
+        }
+    }
+
     // Calculate errors:
     size_t errors[sizes_len];
     memset(errors, 0, sizeof(errors));
@@ -478,8 +506,8 @@ int main(int argc, char **argv)
             strerror(errno));
         return EXIT_FAILURE;
     }
-    compile(stream, hdr_stream, ld_stream, sizes, magics, errors,
-        region_size, sizes_len, ispow2, legacy);
+    compile(stream, hdr_stream, ld_stream, sizes, magics, redzone_masks, 
+        errors, region_size, sizes_len, ispow2, legacy);
     fclose(stream);
     fclose(hdr_stream);
     fclose(ld_stream);
@@ -506,8 +534,8 @@ static size_t stack_select(size_t *sizes, size_t sizes_len, size_t size)
  * Output the low-fat-pointer configuration for the given parameters.
  */
 static void compile(FILE *stream, FILE *hdr_stream, FILE *ld_stream,
-    size_t *sizes, size_t *magics, size_t *errors, size_t region_size,
-    size_t sizes_len, bool pow2, bool legacy)
+    size_t *sizes, size_t *magics, size_t *redzone_masks, size_t *errors, 
+    size_t region_size, size_t sizes_len, bool pow2, bool legacy)
 {
     /*
      * Region layout:
@@ -548,6 +576,8 @@ static void compile(FILE *stream, FILE *hdr_stream, FILE *ld_stream,
             LOWFAT_SIZES);
         fprintf(hdr_stream, "#define _LOWFAT_MAGICS ((uint64_t *)0x%X)\n",
             LOWFAT_MAGICS);
+        fprintf(hdr_stream, "#define _REDZONE_MASKS ((uint64_t *)0x%X)\n",
+            REDZONE_MASKS);
         fprintf(hdr_stream, "#define _LOWFAT_REGION_SIZE %zuull\n",
             region_size);
         if (legacy)
@@ -698,6 +728,16 @@ static void compile(FILE *stream, FILE *hdr_stream, FILE *ld_stream,
     for (size_t i = 0; i < sizes_len; i++)
         fprintf(stream, "\t0x%.16zXull, /* idx=%zu, size=%zu */\n", magics[i],
             i, sizes[i]);
+    fprintf(stream, "};\n");
+    fprintf(stream, "\n");
+
+    // redzone_masks
+    fprintf(stream, "static const LOWFAT_CONST_DATA size_t "
+        "redzone_masks[] =\n");
+    fprintf(stream, "{\n");
+    for (size_t i = 0; i < sizes_len; i++)
+        fprintf(stream, "\t0x%.16zXull, /* idx=%zu, size=%zu */\n", 
+            redzone_masks[i], i, sizes[i]);
     fprintf(stream, "};\n");
     fprintf(stream, "\n");
 
