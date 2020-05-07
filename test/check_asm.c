@@ -1,3 +1,8 @@
+// to check asm and compare for non-pow2 and optimized
+int h(int * p) {
+    return p[3];
+}
+
 // to check how many base() operations are performed
 int f(int *p)
 {

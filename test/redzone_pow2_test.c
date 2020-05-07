@@ -9,7 +9,7 @@
 
 int main(int argc, char **argv) 
 {
-	// allocation region: 8 + 32 = 40, round up to 64
+	// allocation size is (8+32=40) -> in the LowFat sub-heap region of size 64 (pow2).
 	char *buf = (char *)malloc(sizeof(char)*8);
 	char *another_buf = (char *)malloc(sizeof(char)*8);
 
@@ -25,25 +25,25 @@ int main(int argc, char **argv)
 	switch (choice)
 	{
 	case 1: 
-		// valid write inside buf, no error
+		// valid write inside buf, should never report as error.
 		buf[2] = to_write;
 		break;
 	case 2: 
-		// valid write inside another_buf, no error. The offset is chosen because 
-		// the distance between the two allocated object should be 64 bytes.
+		// pointer arithmetic: valid write inside another_buf, should not be error.
+		// red-LowFat does not report as error -> not false positive (FP) here.
+		// The offset 65 is chosen because distance between starting address
+		// of the two allocations is 64 bytes (in power-of-two red-LowFat).
 		buf[65] = to_write;
 		break;
 	case 3:
-		// valid write to unused region in the buf allocation, no error
-		buf[10] = to_write;
+		// same as case 2 but in a different form. 
+		// should not be error, and red-LowFat does not report it -> no FP here.		
+		*(buf+65) = to_write;
 		break;
 	case 4:
-		// ERROR: underflow to own redzone
-		buf[-2] = to_write;
-		break;
-	case 5:
-		// ERROR: overflow, but is catched as underflow to another_buf redzone
-		buf[63] = to_write;
+		// invalid write into un-allocated space, should be error.
+		// red-LowFat detects this and report as error -> true positive (TP).		
+		another_buf[35] = to_write;
 		break;
 	default:
 		break;
