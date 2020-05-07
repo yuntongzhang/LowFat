@@ -171,13 +171,17 @@ BL=$LOWFAT_PATH/blacklist.txt
 BIT=${BIT:-64}
 OPT_LEVEL=${OPT_LEVEL:-"-O2"}
 rm -rf config/$NAME.*
+# for benchmarking memory usage
+export RUSAGE_LOG=$LOWFAT_PATH/spec2006/memory_uninstrumented.log
+MEM_USAGE=$LOWFAT_PATH/spec2006/memory_usage.o
 if [ -z "$FC" ]
 then
     FC=echo
 fi
 
-COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes -mllvm -lowfat-no-check-blacklist=$BL"
-# COMMON_FLAGS=""
+COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes -mllvm -lowfat-no-check-blacklist=$BL $MEM_USAGE"
+# for testing uninstrumented
+# COMMON_FLAGS="$MEM_USAGE"
 CC="$CC    -std=gnu89 $COMMON_FLAGS"
 CXX="$CXX             $COMMON_FLAGS"
 FC="$FC     $COMMON_FLAGS"
