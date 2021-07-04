@@ -171,7 +171,9 @@ then
     FC=echo
 fi
 
-COMMON_FLAGS="-m$BIT -fsanitize=address -g -mllvm -asan-stack=0 -mllvm -asan-globals=0 -fsanitize-blacklist=$BL"
+## perf
+COMMON_FLAGS="-ggdb -m$BIT -fsanitize=address -g -mllvm -asan-stack=0 -mllvm -asan-globals=0 -fsanitize-blacklist=$BL"
+# COMMON_FLAGS="-m$BIT -fsanitize=address -g -mllvm -asan-stack=0 -mllvm -asan-globals=0 -fsanitize-blacklist=$BL"
 # COMMON_FLAGS="-m$BIT -mlzcnt -fsanitize=lowfat -mllvm -lowfat-no-replace-alloca -mllvm -lowfat-no-replace-globals -mllvm -lowfat-no-check-escapes -mllvm -lowfat-no-check-blacklist=$BL"
 # COMMON_FLAGS=""
 CC="$CC    -std=gnu89 $COMMON_FLAGS"
@@ -222,4 +224,7 @@ pwd
 # Don't report alloc-dealloc-mismatch bugs (there is on in 471.omnetpp) and leaks
 export ASAN_OPTIONS=quarantine_size_mb=0:alloc_dealloc_mismatch=0:detect_leaks=0${ASAN_OPTIONS:+:$ASAN_OPTIONS}
 . shrc
-runspec -c $NAME -a run -I -l --size $SIZE -n $NUM_RUNS $@
+## original
+# runspec -c $NAME -a run -I -l --size $SIZE -n $NUM_RUNS $@
+## perf
+perf record -e cpu-clock:u -o ./perf.data.asan runspec -c $NAME -a run -I -l --size $SIZE -n $NUM_RUNS $@
